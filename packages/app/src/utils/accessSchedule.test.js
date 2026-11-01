@@ -1,5 +1,5 @@
 import {
-	isAllowed, nextAccessStart, nextBoundary, readSchedules, readServerClock, serverWallClock
+	instantOf, isAllowed, nextAccessStart, nextBoundary, readSchedules, readServerClock, serverWallClock
 } from './accessSchedule';
 
 const entry = (dayOfWeek, startHour, endHour) => ({dayOfWeek, startHour, endHour});
@@ -137,7 +137,7 @@ describe('server clock', () => {
 	test('reads the server wall clock east of UTC, where it is already the next day', () => {
 		const clock = readServerClock(answer('2026-10-19T23:30:00Z', 19800), deviceNow);
 
-		expect(clock).toEqual({skewMs: 0, offsetMs: 19800000});
+		expect(clock).toEqual({skewMs: 0, offsetMs: 19800000, nextChangeMs: null, nextOffsetMs: null});
 		expect(fields(serverWallClock(clock, deviceNow))).toEqual([2, 5, 0, 0]);
 	});
 
@@ -192,5 +192,68 @@ describe('readSchedules', () => {
 	test('leaves out what is not an entry', () => {
 		expect(readSchedules({AccessSchedules: [null, 5, 'x', {DayOfWeek: 'Monday', StartHour: 1, EndHour: 2}]}))
 			.toEqual([{dayOfWeek: 'Monday', startHour: 1, endHour: 2}]);
+	});
+});
+
+// The night US daylight saving ended in 2026: New York went from UTC-4 to UTC-5 at 06:00 UTC.
+describe('the server\'s next offset change', () => {
+	const tonightMs = Date.UTC(2026, 10, 1, 5, 16, 4);
+	const tonight = {
+		utcTime: '2026-11-01T05:16:04Z',
+		utcOffsetSeconds: -14400,
+		nextOffsetChangeUtc: '2026-11-01T06:00:00Z',
+		nextUtcOffsetSeconds: -18000
+	};
+	// A date whose local fields are the given server wall clock, as nextAccessStart gives
+	const wall = (year, month, day, hour, minute = 0) => new Date(year, month, day, hour, minute);
+
+	test('is read from the answer', () => {
+		const clock = readServerClock(tonight, tonightMs);
+
+		expect(clock.nextChangeMs).toBe(Date.UTC(2026, 10, 1, 6));
+		expect(clock.nextOffsetMs).toBe(-18000000);
+	});
+
+	test('is left out when it is missing, not ahead or nonsense', () => {
+		const base = {utcTime: '2026-11-01T05:16:04Z', utcOffsetSeconds: -14400};
+
+		expect(readServerClock(base, tonightMs).nextChangeMs).toBeNull();
+		expect(readServerClock({...base, nextOffsetChangeUtc: '2026-11-01T05:00:00Z', nextUtcOffsetSeconds: -18000}, tonightMs).nextChangeMs).toBeNull();
+		expect(readServerClock({...base, nextOffsetChangeUtc: '2026-11-01T06:00:00Z', nextUtcOffsetSeconds: 'x'}, tonightMs).nextOffsetMs).toBeNull();
+	});
+
+	test('makes an opening after the clocks go back an hour later', () => {
+		const clock = readServerClock(tonight, tonightMs);
+
+		expect(instantOf(clock, wall(2026, 10, 1, 7)).getTime()).toBe(Date.UTC(2026, 10, 1, 12));
+	});
+
+	test('leaves an opening before the change as the wall clock says', () => {
+		const clock = readServerClock(tonight, tonightMs);
+
+		expect(instantOf(clock, wall(2026, 10, 1, 1, 50)).getTime()).toBe(Date.UTC(2026, 10, 1, 5, 50));
+	});
+
+	test('uses the current offset without the change', () => {
+		const clock = readServerClock({utcTime: '2026-11-01T05:16:04Z', utcOffsetSeconds: -14400}, tonightMs);
+
+		expect(instantOf(clock, wall(2026, 10, 1, 7)).getTime()).toBe(Date.UTC(2026, 10, 1, 11));
+	});
+
+	test('makes an opening after the clocks go forward an hour sooner', () => {
+		const clock = readServerClock({
+			utcTime: '2027-03-13T17:00:00Z',
+			utcOffsetSeconds: -18000,
+			nextOffsetChangeUtc: '2027-03-14T07:00:00Z',
+			nextUtcOffsetSeconds: -14400
+		}, Date.UTC(2027, 2, 13, 17));
+
+		expect(instantOf(clock, wall(2027, 2, 14, 7)).getTime()).toBe(Date.UTC(2027, 2, 14, 11));
+	});
+
+	test('gives the instant on this device\'s clock', () => {
+		const clock = readServerClock(tonight, tonightMs - 30000);
+
+		expect(instantOf(clock, wall(2026, 10, 1, 7)).getTime()).toBe(Date.UTC(2026, 10, 1, 11, 59, 30));
 	});
 });

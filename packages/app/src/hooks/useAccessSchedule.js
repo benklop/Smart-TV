@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {
-	isAllowed, nextAccessStart, nextBoundary, readSchedules, readServerClock, serverWallClock
+	instantOf, isAllowed, nextAccessStart, nextBoundary, readSchedules, readServerClock, serverWallClock
 } from '../utils/accessSchedule';
 
 const MAX_WAIT_MS = 60 * 1000;
@@ -33,7 +33,8 @@ const RETRY_MS = 15 * 1000;
  * @param {() => number} [options.getDeviceUtcMs] this device's UTC clock in milliseconds
  * @param {() => void} [options.onBlocked] called once each time the time runs out
  * @returns {{blocked: boolean, nextAccess: Date|null, recheck: () => void, getScheduleNow: () => Date}}
- *   getScheduleNow is the current time on the clock the hours are judged by, to read as `nextAccess` is
+ *   nextAccess is the instant the user is next let in, which shows in this device's zone.
+ *   getScheduleNow is the current time on the clock the hours are judged by.
  */
 export const useAccessSchedule = ({
 	userId, enabled, fetchUser, serverRefuses, fetchServerTime, getNow, getDeviceUtcMs = Date.now, onBlocked
@@ -76,8 +77,12 @@ export const useAccessSchedule = ({
 			blocked = !allowed;
 			if (!blocked && !wasBlocked) return;
 			// Refreshed on every check while blocked so the screen tracks schedule edits and day rollover.
-			// It's worked out on this device's clock, so it's null when that clock says the window is open.
-			setState({blocked, nextAccess: blocked ? nextAccessStart(schedules, now) : null});
+			// It's worked out on the schedule's clock, so it's null when that clock says the window is
+			// open. One on the server's wall clock is turned into an instant, which shows in this
+			// device's zone, since that is the clock the viewer reads.
+			const opening = blocked ? nextAccessStart(schedules, now) : null;
+			const clock = serverClockRef.current;
+			setState({blocked, nextAccess: opening && clock ? instantOf(clock, opening) : opening});
 			if (blocked && !wasBlocked) latest.current.onBlocked?.();
 		};
 

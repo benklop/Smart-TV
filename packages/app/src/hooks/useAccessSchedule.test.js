@@ -217,7 +217,8 @@ describe('useAccessSchedule', () => {
 			await flush();
 
 			expect(result.current.blocked).toBe(true);
-			expect(result.current.nextAccess).toEqual(new Date(2026, 9, 26, 8));
+			// 08:00 on the server's clock, eight hours west of UTC, is 16:00 UTC: named as that instant
+			expect(result.current.nextAccess).toEqual(new Date(Date.UTC(2026, 9, 26, 16)));
 		});
 
 		test('lets the server answer of the user still decide', async () => {

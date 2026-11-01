@@ -634,7 +634,7 @@ const AppContent = (props) => {
 	// A user outside the hours their account allows can't do anything on the server, so the
 	// app says so and stops what is playing. The check is run again whenever the app comes back.
 	const recheckAccessRef = useRef(null);
-	const {blocked: timesUp, nextAccess, recheck: recheckAccess, getScheduleNow} = useAccessSchedule({
+	const {blocked: timesUp, nextAccess, recheck: recheckAccess} = useAccessSchedule({
 		userId: isAuthenticated ? user?.Id : null,
 		enabled: serverType !== 'emby',
 		fetchUser: () => api.getUserConfiguration(),
@@ -1657,7 +1657,7 @@ const AppContent = (props) => {
 			<div className={css.app} {...props}>
 				<TimesUp
 					nextAccess={nextAccess}
-					now={getScheduleNow()}
+					now={new Date()}
 					clockDisplay={settings.clockDisplay}
 					onSwitchUser={handleTimesUpSwitchUser}
 				/>

@@ -94,19 +94,54 @@ export const nextBoundary = (schedules, now) => {
 	return earliest;
 };
 
+const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+
 /**
  * How the server's clock differs from this device's, from the answer of the plugin's
- * Moonfin/Time. Kept instead of a moment so it stays right as time passes.
+ * Moonfin/Time. Kept instead of a moment so it stays right as time passes. The server's next
+ * offset change comes along when the plugin reports it, and is null otherwise.
  *
- * @param {{utcTime?: string, utcOffsetSeconds?: number}} [time] the answer
+ * @param {{utcTime?: string, utcOffsetSeconds?: number, nextOffsetChangeUtc?: string, nextUtcOffsetSeconds?: number}} [time] the answer
  * @param {number} deviceUtcMs this device's UTC clock when the answer arrived
- * @returns {{skewMs: number, offsetMs: number}|null} null when the answer is unusable
+ * @returns {{skewMs: number, offsetMs: number, nextChangeMs: number|null, nextOffsetMs: number|null}|null}
+ *   null when the answer is unusable
  */
 export const readServerClock = (time, deviceUtcMs) => {
 	const utc = Date.parse(time?.utcTime);
 	const offset = time?.utcOffsetSeconds;
-	if (Number.isNaN(utc) || typeof offset !== 'number' || !Number.isFinite(offset)) return null;
-	return {skewMs: utc - deviceUtcMs, offsetMs: offset * 1000};
+	if (Number.isNaN(utc) || !isFiniteNumber(offset)) return null;
+	const change = Date.parse(time?.nextOffsetChangeUtc);
+	const after = time?.nextUtcOffsetSeconds;
+	const hasChange = !Number.isNaN(change) && change > utc && isFiniteNumber(after);
+	return {
+		skewMs: utc - deviceUtcMs,
+		offsetMs: offset * 1000,
+		nextChangeMs: hasChange ? change : null,
+		nextOffsetMs: hasChange ? after * 1000 : null
+	};
+};
+
+/**
+ * The instant, on this device's clock, of a date whose local fields are the server's wall clock,
+ * such as a next opening from {@link nextAccessStart} on {@link serverWallClock}. When it falls
+ * after the server's next offset change, the offset after it is used, so a wall time after the
+ * clocks go back is an hour later than the current offset says and one after they go forward an
+ * hour sooner. Without that change the current offset is used.
+ *
+ * @param {{skewMs: number, offsetMs: number, nextChangeMs?: number|null, nextOffsetMs?: number|null}} clock
+ * @param {Date} wall
+ * @returns {Date} a real instant, which shows in this device's zone
+ */
+export const instantOf = (clock, wall) => {
+	const fields = Date.UTC(
+		wall.getFullYear(), wall.getMonth(), wall.getDate(),
+		wall.getHours(), wall.getMinutes(), wall.getSeconds()
+	);
+	let serverUtc = fields - clock.offsetMs;
+	if (clock.nextChangeMs != null && clock.nextOffsetMs != null && serverUtc >= clock.nextChangeMs) {
+		serverUtc = fields - clock.nextOffsetMs;
+	}
+	return new Date(serverUtc - clock.skewMs);
 };
 
 /**
